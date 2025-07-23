@@ -227,11 +227,15 @@ router.put('/games/:id/fix', adminAuth, async (req, res) => {
       return res.status(404).json({ error: 'Game not found' });
     }
 
+    if (game.status === 'completed') {
+      return res.status(400).json({ error: 'Cannot fix result of completed game' });
+    }
+
     game.isFixed = true;
     game.fixedResult = fixedResult;
     await game.save();
 
-    res.json({ message: 'Game result fixed successfully' });
+    res.json({ message: 'Game result fixed successfully', game });
   } catch (error) {
     console.error('Fix game error:', error);
     res.status(500).json({ error: 'Server error' });

@@ -20,6 +20,7 @@ export function AdminGameControl() {
     fetchCurrentGame();
     fetchGameStats();
     fetchAdminSettings();
+    fetchContinuousStatus();
   }, []);
 
   const showMessage = (type: 'success' | 'error', text: string) => {
@@ -59,9 +60,28 @@ export function AdminGameControl() {
     }
   };
 
+  const fetchContinuousStatus = async () => {
+    try {
+      const response = await api.getContinuousGamesStatus();
+      setContinuousGamesRunning(response.enabled);
+    } catch (error) {
+      console.error('Error fetching continuous status:', error);
+    }
+  };
+
   const handleFixResult = async () => {
-    if (!currentGame || !fixedResult) {
-      showMessage('error', 'Please select a number and ensure there is an active game');
+    if (!fixedResult) {
+      showMessage('error', 'Please select a number (0-9)');
+      return;
+    }
+
+    if (!currentGame) {
+      showMessage('error', 'No active game found');
+      return;
+    }
+
+    if (currentGame.status === 'completed') {
+      showMessage('error', 'Cannot fix result of completed game');
       return;
     }
 
@@ -163,6 +183,7 @@ export function AdminGameControl() {
             fetchCurrentGame();
             fetchGameStats();
             fetchAdminSettings();
+            fetchContinuousStatus();
           }}
           className="bg-[#00d4aa] hover:bg-[#00c49a] text-[#0f212e] font-bold py-2 px-4 rounded-lg transition-all"
         >
