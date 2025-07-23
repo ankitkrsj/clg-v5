@@ -12,6 +12,60 @@ const router = express.Router();
 let gameCreationInProgress = false;
 let continuousGamesEnabled = false;
 let gameCreationTimeout = null;
+let gameCheckInterval = null;
+
+// Start game monitoring when server starts
+const startGameMonitoring = () => {
+  if (gameCheckInterval) {
+    clearInterval(gameCheckInterval);
+  }
+  
+  gameCheckInterval = setInterval(async () => {
+    try {
+      if (!continuousGamesEnabled) return;
+      
+      const activeGame = await Game.findOne({ 
+        status: { $in: ['waiting', 'betting'] } 
+      }).sort({ createdAt: -1 });
+
+      if (!activeGame) {
+        if (continuousGamesEnabled) {
+          await createNewGameSafely();
+        }
+        return;
+      }
+
+      const now = new Date();
+      
+      // Check if waiting game should start betting
+      if (activeGame.status === 'waiting' && now >= activeGame.startTime) {
+        activeGame.status = 'betting';
+        await activeGame.save();
+        console.log(`Game #${activeGame.gameNumber} started betting`);
+      }
+      
+      // Check if betting game should end
+      if (activeGame.status === 'betting') {
+        const settings = await AdminSettings.findOne();
+        const bettingDuration = (settings?.gameDuration || 60) * 1000;
+        const bettingEndTime = new Date(activeGame.startTime.getTime() + bettingDuration);
+        
+        if (now >= bettingEndTime) {
+          await endGameAndProcessBets(activeGame);
+          
+          // Schedule next game creation
+          if (continuousGamesEnabled) {
+            setTimeout(async () => {
+              await createNewGameSafely();
+            }, 3000); // 3 seconds delay
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error in game monitoring:', error);
+    }
+  }, 2000); // Check every 2 seconds
+};
 
 // Get current game
 router.get('/current', auth, async (req, res) => {
@@ -20,37 +74,6 @@ router.get('/current', auth, async (req, res) => {
       status: { $in: ['waiting', 'betting'] } 
     }).sort({ createdAt: -1 });
 
-    if (!game) {
-      // Only create a new game if continuous games are enabled
-      if (continuousGamesEnabled) {
-        game = await createNewGameSafely();
-      }
-    } else {
-      // Check if waiting game should start betting
-      const now = new Date();
-      if (game.status === 'waiting' && now >= game.startTime) {
-        game.status = 'betting';
-        await game.save();
-      }
-      
-      // Check if betting game should end
-      if (game.status === 'betting') {
-        const settings = await AdminSettings.findOne();
-        const bettingDuration = (settings?.gameDuration || 60) * 1000; // Convert to milliseconds
-        const bettingEndTime = new Date(game.startTime.getTime() + bettingDuration);
-        
-        if (now >= bettingEndTime) {
-          // Auto-end the game
-          await endGameAndProcessBets(game);
-          
-          // Schedule next game creation if continuous games are enabled
-          if (continuousGamesEnabled) {
-            scheduleNextGameCreation();
-          }
-        }
-      }
-    }
-
     res.json({ game });
   } catch (error) {
     console.error('Get current game error:', error);
@@ -58,7 +81,7 @@ router.get('/current', auth, async (req, res) => {
   }
 });
 
-// Safe game creation with proper locking
+// Safe game creation with proper locking and unique game numbers
 async function createNewGameSafely() {
   if (gameCreationInProgress) {
     console.log('Game creation already in progress, skipping...');
@@ -78,33 +101,39 @@ async function createNewGameSafely() {
       return existingGame;
     }
 
-    // Get the next game number safely
+    // Get the next game number safely with atomic operation
     const lastGame = await Game.findOne().sort({ gameNumber: -1 });
     const nextGameNumber = lastGame ? lastGame.gameNumber + 1 : 1;
     
-    // Try to create the game with retry logic
+    // Create the game with retry logic for duplicate key errors
     let attempts = 0;
-    const maxAttempts = 3;
+    const maxAttempts = 5;
     
     while (attempts < maxAttempts) {
       try {
-        const game = new Game({
+        const gameData = {
           gameNumber: nextGameNumber + attempts,
           status: 'waiting',
           startTime: new Date(Date.now() + 5000) // Start in 5 seconds
-        });
+        };
         
+        const game = new Game(gameData);
         await game.save();
+        
         console.log(`Successfully created game #${game.gameNumber}`);
         return game;
       } catch (error) {
-        if (error.code === 11000) {
+        if (error.code === 11000) { // Duplicate key error
           attempts++;
           console.log(`Duplicate key error, retrying with gameNumber ${nextGameNumber + attempts}`);
+          
           if (attempts >= maxAttempts) {
-            console.log('Max attempts reached, giving up game creation');
+            console.log('Max attempts reached for game creation');
             return null;
           }
+          
+          // Wait a bit before retrying
+          await new Promise(resolve => setTimeout(resolve, 100));
         } else {
           throw error;
         }
@@ -118,91 +147,73 @@ async function createNewGameSafely() {
   }
 }
 
-// Schedule next game creation with debouncing
-function scheduleNextGameCreation() {
-  // Clear any existing timeout
-  if (gameCreationTimeout) {
-    clearTimeout(gameCreationTimeout);
-  }
-  
-  // Only schedule if continuous games are enabled
-  if (!continuousGamesEnabled) {
-    return;
-  }
-  
-  gameCreationTimeout = setTimeout(async () => {
-    try {
-      if (continuousGamesEnabled) {
-        await createNewGameSafely();
-      }
-    } catch (error) {
-      console.error('Error in scheduled game creation:', error);
-    }
-  }, 5000); // 5 seconds delay
-}
-
 // Helper function to end game and process bets
 async function endGameAndProcessBets(game) {
-  const resultNumber = game.fixedResult !== null ? game.fixedResult : Math.floor(Math.random() * 10);
-  const resultColor = resultNumber === 0 ? 'green' : (resultNumber % 2 === 0 ? 'red' : 'green');
-  const resultSize = resultNumber >= 5 ? 'big' : 'small';
+  try {
+    const resultNumber = game.fixedResult !== null ? game.fixedResult : Math.floor(Math.random() * 10);
+    const resultColor = resultNumber === 0 ? 'green' : (resultNumber % 2 === 0 ? 'red' : 'green');
+    const resultSize = resultNumber >= 5 ? 'big' : 'small';
 
-  game.status = 'completed';
-  game.endTime = new Date();
-  game.resultNumber = resultNumber;
-  game.resultColor = resultColor;
-  game.resultSize = resultSize;
-  await game.save();
+    game.status = 'completed';
+    game.endTime = new Date();
+    game.resultNumber = resultNumber;
+    game.resultColor = resultColor;
+    game.resultSize = resultSize;
+    await game.save();
 
-  console.log(`Game #${game.gameNumber} ended with result: ${resultNumber} (${resultColor}, ${resultSize})`);
+    console.log(`Game #${game.gameNumber} ended with result: ${resultNumber} (${resultColor}, ${resultSize})`);
 
-  // Process bets
-  const bets = await Bet.find({ gameId: game._id, result: 'pending' });
-  
-  for (const bet of bets) {
-    let isWin = false;
-    let multiplier = 1;
+    // Process bets
+    const bets = await Bet.find({ gameId: game._id, result: 'pending' });
+    
+    for (const bet of bets) {
+      let isWin = false;
+      let multiplier = 1;
 
-    switch (bet.betType) {
-      case 'number':
-        isWin = parseInt(bet.betValue) === resultNumber;
-        multiplier = 9;
-        break;
-      case 'color':
-        isWin = bet.betValue === resultColor;
-        multiplier = 2;
-        break;
-      case 'size':
-        isWin = bet.betValue === resultSize;
-        multiplier = 2;
-        break;
-    }
-
-    bet.result = isWin ? 'win' : 'loss';
-    bet.payout = isWin ? bet.amount * multiplier : 0;
-    await bet.save();
-
-    if (isWin) {
-      // Update wallet
-      const wallet = await Wallet.findOne({ userId: bet.userId });
-      if (wallet) {
-        wallet.balance += bet.payout;
-        await wallet.save();
+      switch (bet.betType) {
+        case 'number':
+          isWin = parseInt(bet.betValue) === resultNumber;
+          multiplier = 9;
+          break;
+        case 'color':
+          isWin = bet.betValue === resultColor;
+          multiplier = 2;
+          break;
+        case 'size':
+          isWin = bet.betValue === resultSize;
+          multiplier = 2;
+          break;
       }
 
-      // Create transaction
-      const transaction = new Transaction({
-        userId: bet.userId,
-        type: 'win',
-        amount: bet.payout,
-        description: `Won $${bet.payout} from ${bet.betType} bet on ${bet.betValue}`,
-        status: 'approved'
-      });
-      await transaction.save();
-    }
-  }
+      bet.result = isWin ? 'win' : 'loss';
+      bet.payout = isWin ? bet.amount * multiplier : 0;
+      await bet.save();
 
-  console.log(`Processed ${bets.length} bets for game #${game.gameNumber}`);
+      if (isWin) {
+        // Update wallet
+        const wallet = await Wallet.findOne({ userId: bet.userId });
+        if (wallet) {
+          wallet.balance += bet.payout;
+          await wallet.save();
+        }
+
+        // Create transaction
+        const transaction = new Transaction({
+          userId: bet.userId,
+          type: 'win',
+          amount: bet.payout,
+          description: `Won $${bet.payout} from ${bet.betType} bet on ${bet.betValue} (Game #${game.gameNumber})`,
+          status: 'approved'
+        });
+        await transaction.save();
+      }
+    }
+
+    console.log(`Processed ${bets.length} bets for game #${game.gameNumber}`);
+  } catch (error) {
+    console.error('Error ending game and processing bets:', error);
+    throw error;
+  }
 }
 
 // Place bet
@@ -247,7 +258,7 @@ router.post('/bet', auth, async (req, res) => {
       userId: req.user._id,
       type: 'bet',
       amount: -amount,
-      description: `Bet $${amount} on ${betType}: ${betValue}`,
+      description: `Bet $${amount} on ${betType}: ${betValue} (Game #${game.gameNumber})`,
       status: 'approved'
     });
     await transaction.save();
@@ -282,6 +293,21 @@ router.get('/current-bet', auth, async (req, res) => {
   }
 });
 
+// Get user's recent bets
+router.get('/user-bets', auth, async (req, res) => {
+  try {
+    const bets = await Bet.find({ userId: req.user._id })
+      .populate('gameId')
+      .sort({ createdAt: -1 })
+      .limit(20);
+
+    res.json({ bets });
+  } catch (error) {
+    console.error('Get user bets error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // Admin: Create new game
 router.post('/create', adminAuth, async (req, res) => {
   try {
@@ -305,6 +331,10 @@ router.put('/:id/end', adminAuth, async (req, res) => {
       return res.status(404).json({ error: 'Game not found' });
     }
 
+    if (game.status === 'completed') {
+      return res.status(400).json({ error: 'Game is already completed' });
+    }
+
     await endGameAndProcessBets(game);
 
     res.json({ message: 'Game ended successfully', game });
@@ -326,15 +356,13 @@ router.post('/start-continuous', adminAuth, async (req, res) => {
       { status: 'completed', endTime: new Date() }
     );
 
+    // Start game monitoring
+    startGameMonitoring();
+
     // Create first game
     const game = await createNewGameSafely();
     
     if (game) {
-      // Start the game immediately
-      game.status = 'betting';
-      game.startTime = new Date();
-      await game.save();
-      
       res.json({ message: 'Continuous games started', game });
     } else {
       res.status(400).json({ error: 'Failed to start continuous games' });
@@ -351,7 +379,12 @@ router.post('/stop-continuous', adminAuth, async (req, res) => {
     // Disable continuous games
     continuousGamesEnabled = false;
     
-    // Clear any pending game creation
+    // Clear intervals
+    if (gameCheckInterval) {
+      clearInterval(gameCheckInterval);
+      gameCheckInterval = null;
+    }
+    
     if (gameCreationTimeout) {
       clearTimeout(gameCreationTimeout);
       gameCreationTimeout = null;
@@ -383,5 +416,33 @@ router.get('/continuous-status', adminAuth, async (req, res) => {
     res.status(500).json({ error: 'Server error' });
   }
 });
+
+// Admin: Fix game result
+router.put('/:id/fix', adminAuth, async (req, res) => {
+  try {
+    const { fixedResult } = req.body;
+    
+    const game = await Game.findById(req.params.id);
+    if (!game) {
+      return res.status(404).json({ error: 'Game not found' });
+    }
+
+    if (game.status === 'completed') {
+      return res.status(400).json({ error: 'Cannot fix result of completed game' });
+    }
+
+    game.isFixed = true;
+    game.fixedResult = fixedResult;
+    await game.save();
+
+    res.json({ message: 'Game result fixed successfully', game });
+  } catch (error) {
+    console.error('Fix game error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Start monitoring when module loads
+startGameMonitoring();
 
 module.exports = router;

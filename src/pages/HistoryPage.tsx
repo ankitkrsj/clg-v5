@@ -12,17 +12,18 @@ export function HistoryPage() {
     return bet.result === filter;
   });
 
-  const getColorBadge = (color: string) => {
-    const colorClasses = {
-      red: 'bg-red-500/20 text-red-300 border-red-500/30',
-      green: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
-      blue: 'bg-blue-500/20 text-blue-300 border-blue-500/30',
-      yellow: 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30',
-    };
+  const getBetTypeBadge = (betType: string, betValue: string) => {
+    let colorClass = 'bg-blue-500/20 text-blue-300 border-blue-500/30';
+    
+    if (betType === 'color') {
+      colorClass = betValue === 'red' ? 'bg-red-500/20 text-red-300 border-red-500/30' : 'bg-green-500/20 text-green-300 border-green-500/30';
+    } else if (betType === 'number') {
+      colorClass = 'bg-purple-500/20 text-purple-300 border-purple-500/30';
+    }
     
     return (
-      <span className={`px-2 py-1 rounded-full text-xs font-medium border capitalize ${colorClasses[color as keyof typeof colorClasses]}`}>
-        {color}
+      <span className={`px-2 py-1 rounded-full text-xs font-medium border capitalize ${colorClass}`}>
+        {betType}: {betValue}
       </span>
     );
   };
@@ -148,19 +149,28 @@ export function HistoryPage() {
                     <div>
                       <div className="flex items-center space-x-3 mb-2">
                         <span className="text-white font-medium">
-                          ${bet.amount.toFixed(2)} on
+                          ${bet.amount.toFixed(2)}
                         </span>
-                        {getColorBadge(bet.color)}
-                        <span className="text-[#b1bad3]">→</span>
-                        {getColorBadge(bet.winning_color)}
+                        {getBetTypeBadge(bet.betType, bet.betValue)}
+                        {bet.gameId && bet.gameId.resultNumber !== undefined && (
+                          <>
+                            <span className="text-[#b1bad3]">→</span>
+                            <span className="text-[#b1bad3] text-sm">
+                              Result: {bet.gameId.resultNumber} ({bet.gameId.resultColor}, {bet.gameId.resultSize})
+                            </span>
+                          </>
+                        )}
                       </div>
                       
                       <div className="flex items-center space-x-4 text-sm text-[#b1bad3]">
                         <span className="flex items-center space-x-1">
                           <Calendar className="h-3 w-3" />
-                          <span>{new Date(bet.created_at).toLocaleDateString()}</span>
+                          <span>{new Date(bet.createdAt).toLocaleDateString()}</span>
                         </span>
-                        <span>{new Date(bet.created_at).toLocaleTimeString()}</span>
+                        <span>{new Date(bet.createdAt).toLocaleTimeString()}</span>
+                        {bet.gameId && (
+                          <span>Game #{bet.gameId.gameNumber}</span>
+                        )}
                       </div>
                     </div>
                   </div>

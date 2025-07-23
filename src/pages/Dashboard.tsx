@@ -1,6 +1,7 @@
 import React from 'react';
 import { useWallet } from '../hooks/useWallet';
 import { useGame } from '../hooks/useGame';
+import { useBets } from '../hooks/useBets';
 import { useAuth } from '../contexts/AuthContext';
 import { Link } from 'react-router-dom';
 import { Coins, Gamepad2, TrendingUp, Activity, Trophy, TrendingDown, Zap, Target, Play } from 'lucide-react';
@@ -9,17 +10,9 @@ export function Dashboard() {
   const { user } = useAuth();
   const { wallet } = useWallet();
   const { currentGame } = useGame();
+  const { getStats } = useBets();
   
-  // Mock stats for now - you can implement real stats later
-  const stats = {
-    totalBets: 0,
-    wins: 0,
-    losses: 0,
-    winRate: 0,
-    totalWagered: 0,
-    totalWon: 0,
-    netProfit: 0,
-  };
+  const stats = getStats();
 
   const cards = [
     {

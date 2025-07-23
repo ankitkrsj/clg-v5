@@ -45,6 +45,7 @@ export function useGame() {
     betType: string;
     betValue: string;
   } | null>(null);
+  const [lastCompletedGame, setLastCompletedGame] = useState<Game | null>(null);
 
   useEffect(() => {
     fetchCurrentGame();
@@ -52,7 +53,7 @@ export function useGame() {
     const interval = setInterval(() => {
       fetchCurrentGame();
       fetchCurrentBet();
-    }, 5000); // Check every 5 seconds
+    }, 3000); // Check every 3 seconds
     return () => clearInterval(interval);
   }, []);
 
@@ -67,7 +68,7 @@ export function useGame() {
           const timeToStart = Math.max(0, Math.ceil((startTime - now) / 1000));
           setTimeLeft(timeToStart);
         } else if (currentGame.status === 'betting') {
-          // Show countdown for betting time (default 60 seconds, but should come from settings)
+          // Show countdown for betting time (default 60 seconds)
           const duration = 60000; // 60 seconds default
           const elapsed = now - startTime;
           const remaining = Math.max(0, Math.ceil((duration - elapsed) / 1000));
@@ -84,7 +85,8 @@ export function useGame() {
     if (currentGame && currentBet && 
         currentGame.status === 'completed' && 
         currentBet.result !== 'pending' &&
-        currentGame.resultNumber !== undefined) {
+        currentGame.resultNumber !== undefined &&
+        (!lastCompletedGame || lastCompletedGame._id !== currentGame._id)) {
       
       const isWin = currentBet.result === 'win';
       setBetResult({
@@ -96,8 +98,10 @@ export function useGame() {
         betType: currentBet.betType,
         betValue: currentBet.betValue,
       });
+      
+      setLastCompletedGame(currentGame);
     }
-  }, [currentGame, currentBet]);
+  }, [currentGame, currentBet, lastCompletedGame]);
 
   const fetchCurrentGame = async () => {
     try {

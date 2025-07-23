@@ -12,16 +12,42 @@ interface Bet {
   result: 'win' | 'loss' | 'pending';
   payout: number;
   createdAt: string;
+  gameId?: {
+    gameNumber: number;
+    resultNumber?: number;
+    resultColor?: string;
+    resultSize?: string;
+  };
+}
+
+interface UserStats {
+  totalBets: number;
+  wins: number;
+  losses: number;
+  winRate: number;
+  totalWagered: number;
+  totalWon: number;
+  netProfit: number;
 }
 
 export function useBets() {
   const { user } = useAuth();
   const [bets, setBets] = useState<Bet[]>([]);
+  const [stats, setStats] = useState<UserStats>({
+    totalBets: 0,
+    wins: 0,
+    losses: 0,
+    winRate: 0,
+    totalWagered: 0,
+    totalWon: 0,
+    netProfit: 0,
+  });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (user) {
       fetchBets();
+      fetchStats();
     }
   }, [user]);
 
@@ -29,9 +55,8 @@ export function useBets() {
     if (!user) return;
 
     try {
-      // For now, we'll use mock data since the backend doesn't have a bets endpoint yet
-      // You can implement this when you add the bets API endpoint
-      setBets([]);
+      const response = await api.getUserBets();
+      setBets(response.bets || []);
     } catch (error) {
       console.error('Error fetching bets:', error);
     } finally {
@@ -39,51 +64,26 @@ export function useBets() {
     }
   };
 
-  const placeBet = async (color: string, amount: number) => {
-    if (!user) throw new Error('User not authenticated');
-
-    // Mock implementation - replace with actual API call
-    const colors = ['red', 'green', 'blue', 'yellow'];
-    const winningColor = colors[Math.floor(Math.random() * colors.length)];
-    const isWin = color === winningColor;
-    const payout = isWin ? amount * 3 : 0;
+  const fetchStats = async () => {
+    if (!user) return;
 
     try {
-      // This would be replaced with actual API call to place bet
-      // await api.placeBet(gameId, 'color', color, amount);
-      
-      await fetchBets();
-      return { winningColor, isWin, payout };
+      const response = await api.getUserStats();
+      setStats(response.stats);
     } catch (error) {
-      console.error('Error placing bet:', error);
-      throw error;
+      console.error('Error fetching stats:', error);
     }
   };
 
-  const getStats = () => {
-    const totalBets = bets.length;
-    const wins = bets.filter((bet) => bet.result === 'win').length;
-    const winRate = totalBets > 0 ? (wins / totalBets) * 100 : 0;
-    const totalWagered = bets.reduce((sum, bet) => sum + bet.amount, 0);
-    const totalWon = bets.reduce((sum, bet) => sum + bet.payout, 0);
-    const netProfit = totalWon - totalWagered;
-
-    return {
-      totalBets,
-      wins,
-      losses: totalBets - wins,
-      winRate,
-      totalWagered,
-      totalWon,
-      netProfit,
-    };
-  };
+  const getStats = () => stats;
 
   return {
     bets,
     loading,
-    placeBet,
     getStats,
-    refetch: fetchBets,
+    refetch: () => {
+      fetchBets();
+      fetchStats();
+    },
   };
 }

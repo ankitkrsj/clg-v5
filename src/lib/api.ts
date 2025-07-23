@@ -108,6 +108,11 @@ class ApiClient {
     });
   }
 
+  // Get user betting statistics
+  async getUserStats() {
+    return this.request('/wallet/stats');
+  }
+
   // Transaction endpoints
   async createDepositRequest(amount: number, screenshot: File) {
     const formData = new FormData();
@@ -190,6 +195,10 @@ class ApiClient {
       method: 'PUT',
       body: JSON.stringify({ fixedResult }),
     });
+  }
+
+  async getContinuousGamesStatus() {
+    return this.request('/games/continuous-status');
   }
 }
 
