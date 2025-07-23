@@ -3,81 +3,20 @@ import { useGame } from '../hooks/useGame';
 import { useWallet } from '../hooks/useWallet';
 import { BetResult } from '../components/BetResult';
 import { BetType } from '../types/database';
-import { Clock, Gamepad2, Target, Palette, Zap, Trophy, AlertCircle } from 'lucide-react';
+import { Clock, Gamepad2, Target, Palette, Zap, Trophy, AlertCircle, CheckCircle } from 'lucide-react';
 
 export function GamePage() {
-  const { currentGame, timeLeft, placeBet, loading: gameLoading } = useGame();
+  const { currentGame, currentBet, timeLeft, placeBet, betResult, clearBetResult, loading: gameLoading } = useGame();
   const { wallet, refetch: refetchWallet } = useWallet();
   
   const [selectedBetType, setSelectedBetType] = useState<BetType>('number');
   const [selectedValue, setSelectedValue] = useState<string>('');
   const [betAmount, setBetAmount] = useState('');
   const [loading, setLoading] = useState(false);
-  const [betPlaced, setBetPlaced] = useState(false);
-  const [gameResult, setGameResult] = useState<{
-    winningNumber: number;
-    winningColor: 'red' | 'green';
-    winningSize: 'big' | 'small';
-    isWin: boolean;
-    payout: number;
-    betType: string;
-    betValue: string;
-  } | null>(null);
-  const [lastGameId, setLastGameId] = useState<string | null>(null);
 
   const numbers = Array.from({ length: 10 }, (_, i) => i);
   const colors = ['red', 'green'];
   const sizes = ['small', 'big'];
-
-  // Reset bet placed status when new game starts
-  useEffect(() => {
-    if (currentGame) {
-      setBetPlaced(false);
-      
-      // Check if game just completed and show result
-      if (currentGame.status === 'completed' && 
-          currentGame._id !== lastGameId && 
-          currentGame.resultNumber !== undefined &&
-          betPlaced) {
-        
-        // Determine if user won based on their bet
-        let isWin = false;
-        let multiplier = 1;
-        
-        if (selectedBetType && selectedValue) {
-          switch (selectedBetType) {
-            case 'number':
-              isWin = parseInt(selectedValue) === currentGame.resultNumber;
-              multiplier = 9;
-              break;
-            case 'color':
-              isWin = selectedValue === currentGame.resultColor;
-              multiplier = 2;
-              break;
-            case 'size':
-              isWin = selectedValue === currentGame.resultSize;
-              multiplier = 2;
-              break;
-          }
-        }
-        
-        const betAmountNum = parseFloat(betAmount || '0');
-        const payout = isWin ? betAmountNum * multiplier : 0;
-        
-        setGameResult({
-          winningNumber: currentGame.resultNumber,
-          winningColor: currentGame.resultColor!,
-          winningSize: currentGame.resultSize!,
-          isWin,
-          payout,
-          betType: selectedBetType || '',
-          betValue: selectedValue || '',
-        });
-      }
-      
-      setLastGameId(currentGame._id);
-    }
-  }, [currentGame?._id, currentGame?.status, currentGame?.resultNumber]);
 
   const getNumberColor = (num: number) => {
     if (num === 0) return 'bg-green-500';
@@ -97,10 +36,9 @@ export function GamePage() {
       setLoading(true);
       await placeBet(selectedBetType, selectedValue, amount);
       
-      // Reset form and mark bet as placed
+      // Reset form
       setSelectedValue('');
       setBetAmount('');
-      setBetPlaced(true);
       
       // Refresh wallet to show updated balance
       await refetchWallet();
@@ -169,7 +107,7 @@ export function GamePage() {
               <Gamepad2 className="h-6 w-6 text-white" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-white">Game #{currentGame.game_number}</h1>
+              <h1 className="text-2xl font-bold text-white">Game #{currentGame.gameNumber}</h1>
               <p className="text-[#b1bad3]">Status: {currentGame.status}</p>
             </div>
           </div>
@@ -198,16 +136,19 @@ export function GamePage() {
           </div>
         )}
 
-        {betPlaced && currentGame.status === 'betting' && (
+        {currentBet && currentGame.status === 'betting' && (
           <div className="bg-[#00d4aa]/20 border border-[#00d4aa]/30 rounded-lg p-4 text-center">
             <Trophy className="h-8 w-8 text-[#00d4aa] mx-auto mb-2" />
             <p className="text-[#00d4aa] font-bold">Bet Placed Successfully!</p>
+            <p className="text-white text-sm">
+              You bet ${currentBet.amount} on {currentBet.betType}: {currentBet.betValue}
+            </p>
             <p className="text-white text-sm">Good luck! Results will be announced when the timer ends.</p>
           </div>
         )}
       </div>
 
-      {currentGame.status === 'betting' && !betPlaced && (
+      {currentGame.status === 'betting' && !currentBet && (
         <>
           {/* Bet Type Selection */}
           <div className="bg-[#1a2c38] border border-[#2f4553] rounded-2xl p-6">
@@ -411,17 +352,17 @@ export function GamePage() {
       )}
 
       {/* Bet Result Modal */}
-      {gameResult && (
+      {betResult && (
         <BetResult
-          winningNumber={gameResult.winningNumber}
-          winningColor={gameResult.winningColor}
-          winningSize={gameResult.winningSize}
-          isWin={gameResult.isWin}
-          payout={gameResult.payout}
-          betType={gameResult.betType}
-          betValue={gameResult.betValue}
+          winningNumber={betResult.winningNumber}
+          winningColor={betResult.winningColor}
+          winningSize={betResult.winningSize}
+          isWin={betResult.isWin}
+          payout={betResult.payout}
+          betType={betResult.betType}
+          betValue={betResult.betValue}
           onClose={() => {
-            setGameResult(null);
+            clearBetResult();
             setSelectedValue('');
             setBetAmount('');
           }}

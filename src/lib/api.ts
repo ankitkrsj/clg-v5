@@ -97,6 +97,10 @@ class ApiClient {
     return this.request('/games/current');
   }
 
+  async getCurrentBet() {
+    return this.request('/games/current-bet');
+  }
+
   async placeBet(gameId: string, betType: string, betValue: string, amount: number) {
     return this.request('/games/bet', {
       method: 'POST',
@@ -166,6 +170,18 @@ class ApiClient {
   async endGame(gameId: string) {
     return this.request(`/games/${gameId}/end`, {
       method: 'PUT',
+    });
+  }
+
+  async startContinuousGames() {
+    return this.request('/games/start-continuous', {
+      method: 'POST',
+    });
+  }
+
+  async stopContinuousGames() {
+    return this.request('/games/stop-continuous', {
+      method: 'POST',
     });
   }
 

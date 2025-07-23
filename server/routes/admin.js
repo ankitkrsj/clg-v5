@@ -13,12 +13,13 @@ const router = express.Router();
 // Get admin stats
 router.get('/stats', adminAuth, async (req, res) => {
   try {
-    const totalUsers = await User.countDocuments();
+    const totalUsers = await User.countDocuments({ isBlocked: false });
     const totalBalance = await Wallet.aggregate([
       { $group: { _id: null, total: { $sum: '$balance' } } }
     ]);
     const pendingTransactions = await Transaction.countDocuments({ status: 'pending' });
     const activeGames = await Game.countDocuments({ status: { $in: ['waiting', 'betting'] } });
+    const blockedUsers = await User.countDocuments({ isBlocked: true });
     
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -28,6 +29,15 @@ router.get('/stats', adminAuth, async (req, res) => {
       { $match: { createdAt: { $gte: today } } },
       { $group: { _id: null, total: { $sum: '$amount' } } }
     ]);
+    
+    const totalGames = await Game.countDocuments({ status: 'completed' });
+    const totalBetsAmount = await Bet.aggregate([
+      { $group: { _id: null, total: { $sum: '$amount' } } }
+    ]);
+    const totalWinnings = await Bet.aggregate([
+      { $match: { result: 'win' } },
+      { $group: { _id: null, total: { $sum: '$payout' } } }
+    ]);
 
     res.json({
       totalUsers,
@@ -36,7 +46,10 @@ router.get('/stats', adminAuth, async (req, res) => {
       activeGames,
       todayBets,
       todayRevenue: todayRevenue[0]?.total || 0,
-      blockedUsers: await User.countDocuments({ isBlocked: true })
+      blockedUsers,
+      totalGames,
+      totalBetsAmount: totalBetsAmount[0]?.total || 0,
+      totalWinnings: totalWinnings[0]?.total || 0
     });
   } catch (error) {
     console.error('Get admin stats error:', error);

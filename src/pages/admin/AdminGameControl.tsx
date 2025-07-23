@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../../lib/api';
-import { Settings, Target, Clock, Zap, Play, Square, AlertCircle, CheckCircle } from 'lucide-react';
+import { Settings, Target, Clock, Zap, Play, Square, AlertCircle, CheckCircle, StopCircle } from 'lucide-react';
 
 export function AdminGameControl() {
   const [fixedResult, setFixedResult] = useState('');
@@ -14,10 +14,12 @@ export function AdminGameControl() {
     gamesToday: 0,
   });
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [continuousGamesRunning, setContinuousGamesRunning] = useState(false);
 
   useEffect(() => {
     fetchCurrentGame();
     fetchGameStats();
+    fetchAdminSettings();
   }, []);
 
   const showMessage = (type: 'success' | 'error', text: string) => {
@@ -29,6 +31,7 @@ export function AdminGameControl() {
     try {
       const response = await api.getCurrentGame();
       setCurrentGame(response.game);
+      setContinuousGamesRunning(response.game?.status === 'betting' || response.game?.status === 'waiting');
     } catch (error) {
       console.error('Error fetching current game:', error);
     }
@@ -36,14 +39,23 @@ export function AdminGameControl() {
 
   const fetchGameStats = async () => {
     try {
-      // Mock stats for now - implement when backend has these endpoints
+      const response = await api.getAdminStats();
       setGameStats({
-        activePlayers: 0,
-        totalBets: 0,
-        gamesToday: 0,
+        activePlayers: response.totalUsers || 0,
+        totalBets: response.totalBetsAmount || 0,
+        gamesToday: response.todayBets || 0,
       });
     } catch (error) {
       console.error('Error fetching game stats:', error);
+    }
+  };
+
+  const fetchAdminSettings = async () => {
+    try {
+      const response = await api.getAdminSettings();
+      setGameDuration(response.settings.gameDuration || 60);
+    } catch (error) {
+      console.error('Error fetching admin settings:', error);
     }
   };
 
@@ -81,6 +93,38 @@ export function AdminGameControl() {
     }
   };
 
+  const handleStartContinuousGames = async () => {
+    setLoading(true);
+    try {
+      await api.startContinuousGames();
+      showMessage('success', 'Continuous games started successfully!');
+      setContinuousGamesRunning(true);
+      await fetchCurrentGame();
+      await fetchGameStats();
+    } catch (error: any) {
+      console.error('Error starting continuous games:', error);
+      showMessage('error', 'Error starting continuous games: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleStopContinuousGames = async () => {
+    setLoading(true);
+    try {
+      await api.stopContinuousGames();
+      showMessage('success', 'Continuous games stopped successfully!');
+      setContinuousGamesRunning(false);
+      await fetchCurrentGame();
+      await fetchGameStats();
+    } catch (error: any) {
+      console.error('Error stopping continuous games:', error);
+      showMessage('error', 'Error stopping continuous games: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleForceEndGame = async () => {
     if (!currentGame) {
       showMessage('error', 'No active game to end');
@@ -101,20 +145,6 @@ export function AdminGameControl() {
     }
   };
 
-  const handleStartNewGame = async () => {
-    setLoading(true);
-    try {
-      const response = await api.createGame();
-      showMessage('success', `New game created successfully!`);
-      await fetchCurrentGame();
-    } catch (error: any) {
-      console.error('Error creating new game:', error);
-      showMessage('error', 'Error creating new game: ' + error.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -125,13 +155,14 @@ export function AdminGameControl() {
           </div>
           <div>
             <h1 className="text-3xl font-bold text-white">Game Control</h1>
-            <p className="text-[#b1bad3]">Manage game settings and results</p>
+            <p className="text-[#b1bad3]">Manage game settings and continuous operation</p>
           </div>
         </div>
         <button
           onClick={() => {
             fetchCurrentGame();
             fetchGameStats();
+            fetchAdminSettings();
           }}
           className="bg-[#00d4aa] hover:bg-[#00c49a] text-[#0f212e] font-bold py-2 px-4 rounded-lg transition-all"
         >
@@ -157,48 +188,126 @@ export function AdminGameControl() {
         </div>
       )}
 
-      {/* Current Game Status */}
-      {currentGame ? (
+      {/* Game Control Panel */}
+      <div className="bg-[#1a2c38] border border-[#2f4553] rounded-2xl p-6">
+        <h2 className="text-xl font-bold text-white mb-6 flex items-center space-x-2">
+          <Play className="h-5 w-5 text-[#00d4aa]" />
+          <span>Continuous Game Control</span>
+        </h2>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+          <div className="bg-[#0f212e] border border-[#2f4553] rounded-xl p-4 text-center">
+            <div className={`w-4 h-4 rounded-full mx-auto mb-2 ${continuousGamesRunning ? 'bg-[#00d4aa] animate-pulse' : 'bg-red-500'}`}></div>
+            <p className="text-[#b1bad3] text-sm">Status</p>
+            <p className={`font-bold ${continuousGamesRunning ? 'text-[#00d4aa]' : 'text-red-400'}`}>
+              {continuousGamesRunning ? 'RUNNING' : 'STOPPED'}
+            </p>
+          </div>
+          
+          <div className="bg-[#0f212e] border border-[#2f4553] rounded-xl p-4 text-center">
+            <p className="text-[#b1bad3] text-sm">Current Game</p>
+            <p className="text-2xl font-bold text-white">
+              #{currentGame?.gameNumber || 'None'}
+            </p>
+            <p className="text-[#b1bad3] text-xs">
+              {currentGame?.status?.toUpperCase() || 'No Game'}
+            </p>
+          </div>
+          
+          <div className="bg-[#0f212e] border border-[#2f4553] rounded-xl p-4 text-center">
+            <p className="text-[#b1bad3] text-sm">Game Duration</p>
+            <p className="text-2xl font-bold text-white">{gameDuration}s</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <button
+            onClick={handleStartContinuousGames}
+            disabled={loading || continuousGamesRunning}
+            className="bg-gradient-to-r from-[#00d4aa] to-[#00b4d8] hover:from-[#00c49a] hover:to-[#00a4c8] disabled:from-[#2f4553] disabled:to-[#2f4553] text-[#0f212e] disabled:text-[#b1bad3] font-bold py-4 px-6 rounded-xl transition-all disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+          >
+            <Play className="h-5 w-5" />
+            <span>{loading ? 'Starting...' : 'Start Continuous Games'}</span>
+          </button>
+          
+          <button
+            onClick={handleStopContinuousGames}
+            disabled={loading || !continuousGamesRunning}
+            className="bg-gradient-to-r from-red-500 to-red-600 hover:from-red-400 hover:to-red-500 disabled:from-[#2f4553] disabled:to-[#2f4553] text-white disabled:text-[#b1bad3] font-bold py-4 px-6 rounded-xl transition-all disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+          >
+            <StopCircle className="h-5 w-5" />
+            <span>{loading ? 'Stopping...' : 'Stop Continuous Games'}</span>
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        {/* Game Settings */}
         <div className="bg-[#1a2c38] border border-[#2f4553] rounded-2xl p-6">
-          <h2 className="text-xl font-bold text-white mb-4">Current Game Status</h2>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="bg-[#0f212e] border border-[#2f4553] rounded-xl p-4">
-              <p className="text-[#b1bad3] text-sm">Game Number</p>
-              <p className="text-2xl font-bold text-white">#{currentGame.game_number}</p>
-            </div>
-            <div className="bg-[#0f212e] border border-[#2f4553] rounded-xl p-4">
-              <p className="text-[#b1bad3] text-sm">Status</p>
-              <p className={`text-lg font-bold ${
-                currentGame.status === 'waiting' ? 'text-yellow-400' :
-                currentGame.status === 'betting' ? 'text-[#00d4aa]' :
-                'text-blue-400'
-              }`}>
-                {currentGame.status.toUpperCase()}
+          <h2 className="text-xl font-bold text-white mb-6 flex items-center space-x-2">
+            <Clock className="h-5 w-5 text-blue-400" />
+            <span>Game Settings</span>
+          </h2>
+
+          <div className="space-y-6">
+            <div>
+              <label className="block text-sm font-medium text-[#b1bad3] mb-2">
+                Game Duration (seconds)
+              </label>
+              <input
+                type="number"
+                min="30"
+                max="300"
+                value={gameDuration}
+                onChange={(e) => setGameDuration(parseInt(e.target.value))}
+                className="w-full p-4 bg-[#0f212e] border border-[#2f4553] rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+              <p className="text-[#b1bad3] text-sm mt-1">
+                Current: {Math.floor(gameDuration / 60)}:{(gameDuration % 60).toString().padStart(2, '0')}
               </p>
             </div>
-            <div className="bg-[#0f212e] border border-[#2f4553] rounded-xl p-4">
-              <p className="text-[#b1bad3] text-sm">Fixed Result</p>
-              <p className="text-lg font-bold text-white">
-                {currentGame.isFixed && currentGame.fixedResult !== null ? currentGame.fixedResult : 'Random'}
-              </p>
+
+            <div className="grid grid-cols-3 gap-3">
+              {[30, 60, 120].map((duration) => (
+                <button
+                  key={duration}
+                  onClick={() => setGameDuration(duration)}
+                  className="px-4 py-3 bg-[#2f4553] hover:bg-[#3a5664] text-white rounded-lg transition-all font-medium"
+                >
+                  {duration}s
+                </button>
+              ))}
             </div>
+
+            <button
+              onClick={handleUpdateDuration}
+              disabled={loading}
+              className="w-full bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 disabled:from-[#2f4553] disabled:to-[#2f4553] text-white disabled:text-[#b1bad3] font-bold py-3 px-4 rounded-xl transition-all disabled:cursor-not-allowed"
+            >
+              {loading ? 'Updating...' : 'Update Game Duration'}
+            </button>
+
+            {/* Game Statistics */}
             <div className="bg-[#0f212e] border border-[#2f4553] rounded-xl p-4">
-              <p className="text-[#b1bad3] text-sm">Start Time</p>
-              <p className="text-sm text-white">
-                {new Date(currentGame.startTime).toLocaleTimeString()}
-              </p>
+              <h3 className="text-white font-medium mb-3">Game Statistics</h3>
+              <div className="space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-[#b1bad3]">Active Players:</span>
+                  <span className="text-white">{gameStats.activePlayers}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[#b1bad3]">Total Bets:</span>
+                  <span className="text-white">${gameStats.totalBets.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[#b1bad3]">Today's Bets:</span>
+                  <span className="text-white">{gameStats.gamesToday}</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
-      ) : (
-        <div className="bg-[#1a2c38] border border-[#2f4553] rounded-2xl p-6 text-center">
-          <AlertCircle className="h-12 w-12 text-[#b1bad3] mx-auto mb-4" />
-          <h2 className="text-xl font-bold text-white mb-2">No Active Game</h2>
-          <p className="text-[#b1bad3]">Create a new game to start managing</p>
-        </div>
-      )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         {/* Game Result Fixer */}
         <div className="bg-[#1a2c38] border border-[#2f4553] rounded-2xl p-6">
           <h2 className="text-xl font-bold text-white mb-6 flex items-center space-x-2">
@@ -287,105 +396,33 @@ export function AdminGameControl() {
             </div>
           </div>
         </div>
+      </div>
 
-        {/* Game Settings */}
+      {/* Manual Game Control */}
+      {currentGame && (
         <div className="bg-[#1a2c38] border border-[#2f4553] rounded-2xl p-6">
-          <h2 className="text-xl font-bold text-white mb-6 flex items-center space-x-2">
-            <Clock className="h-5 w-5 text-blue-400" />
-            <span>Game Settings</span>
-          </h2>
-
-          <div className="space-y-6">
-            <div>
-              <label className="block text-sm font-medium text-[#b1bad3] mb-2">
-                Game Duration (seconds)
-              </label>
-              <input
-                type="number"
-                min="30"
-                max="300"
-                value={gameDuration}
-                onChange={(e) => setGameDuration(parseInt(e.target.value))}
-                className="w-full p-4 bg-[#0f212e] border border-[#2f4553] rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
-              <p className="text-[#b1bad3] text-sm mt-1">
-                Current: {Math.floor(gameDuration / 60)}:{(gameDuration % 60).toString().padStart(2, '0')}
-              </p>
-            </div>
-
-            <div className="grid grid-cols-3 gap-3">
-              {[30, 60, 120].map((duration) => (
-                <button
-                  key={duration}
-                  onClick={() => setGameDuration(duration)}
-                  className="px-4 py-3 bg-[#2f4553] hover:bg-[#3a5664] text-white rounded-lg transition-all font-medium"
-                >
-                  {duration}s
-                </button>
-              ))}
-            </div>
-
-            <button
-              onClick={handleUpdateDuration}
-              disabled={loading}
-              className="w-full bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 disabled:from-[#2f4553] disabled:to-[#2f4553] text-white disabled:text-[#b1bad3] font-bold py-3 px-4 rounded-xl transition-all disabled:cursor-not-allowed"
-            >
-              {loading ? 'Updating...' : 'Update Game Duration'}
-            </button>
-
-            {/* Game Statistics */}
+          <h2 className="text-xl font-bold text-white mb-4">Manual Game Control</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="bg-[#0f212e] border border-[#2f4553] rounded-xl p-4">
-              <h3 className="text-white font-medium mb-3">Current Game Stats</h3>
-              <div className="space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-[#b1bad3]">Active Players:</span>
-                  <span className="text-white">{gameStats.activePlayers}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-[#b1bad3]">Total Bets:</span>
-                  <span className="text-white">${gameStats.totalBets.toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-[#b1bad3]">Games Today:</span>
-                  <span className="text-white">{gameStats.gamesToday}</span>
-                </div>
+              <h3 className="text-white font-medium mb-2">Current Game Info</h3>
+              <div className="space-y-1 text-sm">
+                <p className="text-[#b1bad3]">Game #{currentGame.gameNumber}</p>
+                <p className="text-[#b1bad3]">Status: <span className="text-white">{currentGame.status}</span></p>
+                <p className="text-[#b1bad3]">Fixed: <span className="text-white">{currentGame.isFixed ? 'Yes' : 'No'}</span></p>
               </div>
             </div>
+            
+            <button
+              onClick={handleForceEndGame}
+              disabled={!currentGame || currentGame.status === 'completed' || loading}
+              className="bg-gradient-to-r from-yellow-500 to-yellow-600 hover:from-yellow-400 hover:to-yellow-500 disabled:from-[#2f4553] disabled:to-[#2f4553] text-white disabled:text-[#b1bad3] font-bold py-4 px-6 rounded-xl transition-all disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+            >
+              <Square className="h-5 w-5" />
+              <span>Force End Current Game</span>
+            </button>
           </div>
         </div>
-      </div>
-
-      {/* Quick Actions */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <button 
-          onClick={handleForceEndGame}
-          disabled={!currentGame || currentGame.status === 'completed' || loading}
-          className="bg-gradient-to-r from-[#00d4aa] to-[#00b4d8] hover:from-[#00c49a] hover:to-[#00a4c8] disabled:from-[#2f4553] disabled:to-[#2f4553] text-[#0f212e] disabled:text-[#b1bad3] font-bold py-4 px-6 rounded-xl transition-all text-center transform hover:scale-105 disabled:hover:scale-100 disabled:cursor-not-allowed flex flex-col items-center space-y-2"
-        >
-          <Square className="h-5 w-5" />
-          <span>Force End Current Game</span>
-        </button>
-        <button 
-          onClick={handleStartNewGame}
-          disabled={loading}
-          className="bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-400 hover:to-purple-500 disabled:from-[#2f4553] disabled:to-[#2f4553] text-white disabled:text-[#b1bad3] font-bold py-4 px-6 rounded-xl transition-all text-center transform hover:scale-105 disabled:hover:scale-100 disabled:cursor-not-allowed flex flex-col items-center space-y-2"
-        >
-          <Play className="h-5 w-5" />
-          <span>Start New Game</span>
-        </button>
-        <button 
-          onClick={() => {
-            setIsFixingEnabled(false);
-            setFixedResult('');
-            setGameDuration(60);
-            showMessage('success', 'All settings reset to default');
-          }}
-          className="bg-gradient-to-r from-yellow-500 to-yellow-600 hover:from-yellow-400 hover:to-yellow-500 text-white font-bold py-4 px-6 rounded-xl transition-all text-center transform hover:scale-105 flex flex-col items-center space-y-2"
-        >
-          <Settings className="h-5 w-5" />
-          <span>Reset All Settings</span>
-        </button>
-      </div>
+      )}
     </div>
   );
 }
